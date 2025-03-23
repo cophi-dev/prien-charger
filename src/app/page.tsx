@@ -138,7 +138,7 @@ export default function Home() {
         return "Invalid Date"
       }
       return date.toLocaleTimeString()
-    } catch (_) {
+    } catch {
       return "Invalid Date"
     }
   }

@@ -124,7 +124,7 @@ export async function GET(request: Request) {
     // Wait for content to load
     try {
       await page.waitForSelector('.badge', { timeout: 5000 });
-    } catch (_) {
+    } catch {
       console.log('Badge selector timeout, continuing anyway');
     }
     
