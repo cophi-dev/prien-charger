@@ -145,14 +145,16 @@ export async function GET(request: Request) {
       return NextResponse.json(response);
     } else {
       // In local development, we can use Puppeteer for real data
-      const puppeteer = require('puppeteer');
+      // Use dynamic import instead of require
+      const puppeteerModule = await import('puppeteer');
+      const puppeteer = puppeteerModule.default;
       
       // Build the charger URL from the evseId
       const url = `https://www.chrg.direct/?evseId=${encodeURIComponent(REAL_CHARGER_IDS[0])}`;
       console.log(`Fetching data from: ${url}`);
       
       const browser = await puppeteer.launch({
-        headless: "new",
+        headless: true,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox'
