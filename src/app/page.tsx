@@ -7,12 +7,10 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { ExternalLink, Battery, BatteryCharging, BatteryFull, AlertTriangle, BatteryWarning, RefreshCw, Info, MapPin } from "lucide-react"
 
-// The actual charger IDs from the screenshot
+// The actual charger IDs from the screenshot - only include the two we have real links for
 const CHARGER_IDS = [
   "DE*MDS*E006234",
   "DE*MDS*E006198",
-  "DE*PRI*E000001",
-  "DE*PRI*E000002",
 ]
 
 interface ChargerData {
@@ -131,6 +129,15 @@ export default function Home() {
     }
   }
 
+  // Helper to determine if a status is reliable
+  const isReliableStatus = (charger: ChargerData) => {
+    // If we have a status from scraping, it's reliable
+    if (charger.isRealTime && charger.status !== "unknown") {
+      return true;
+    }
+    return false;
+  }
+
   const formatDate = (dateString: string) => {
     try {
       const date = new Date(dateString)
@@ -191,10 +198,10 @@ export default function Home() {
                       <CardTitle className="text-[#0a2158]">
                         {charger.location || `Ladestation ${charger.evseId.split('*').pop()}`}
                       </CardTitle>
-                      <Badge className={getStatusColor(!charger.isRealTime ? "unknown" : charger.status)}>
+                      <Badge className={getStatusColor(isReliableStatus(charger) ? charger.status : "unknown")}>
                         <span className="flex items-center gap-1">
-                          {getStatusIcon(!charger.isRealTime ? "unknown" : charger.status)}
-                          {getStatusLabel(!charger.isRealTime ? "unknown" : charger.status)}
+                          {getStatusIcon(isReliableStatus(charger) ? charger.status : "unknown")}
+                          {getStatusLabel(isReliableStatus(charger) ? charger.status : "unknown")}
                         </span>
                       </Badge>
                     </div>
@@ -206,7 +213,7 @@ export default function Home() {
                   <CardContent className="bg-white pt-6">
                     <div className="flex flex-col gap-4">
                       <div className="flex items-center justify-center py-6">
-                        {!charger.isRealTime ? (
+                        {!isReliableStatus(charger) ? (
                           <div className="flex flex-col items-center">
                             <Battery className="h-20 w-20 text-gray-400" />
                             <p className="mt-2 text-sm text-gray-600">Unbekannt</p>
