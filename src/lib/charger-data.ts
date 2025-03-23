@@ -1,4 +1,11 @@
-const userStatusStore: Record<string, any> = {}
+// Define a type for the user status data
+interface UserStatus {
+  status: string;
+  lastUpdated: string;
+  updatedBy: string;
+}
+
+const userStatusStore: Record<string, UserStatus> = {}
 
 // Define proper types for the charger data
 export interface ChargerData {

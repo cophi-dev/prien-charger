@@ -4,7 +4,7 @@ import { NextResponse } from "next/server"
 // In a real-world application, this would be a database or shared cache
 // For this example, we'll simulate the cache since we can't easily share it between files
 interface CacheEntry {
-  data: any;
+  data: Record<string, unknown>;
   timestamp: number;
 }
 

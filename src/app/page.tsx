@@ -34,7 +34,6 @@ export default function Home() {
   const [chargers, setChargers] = useState<ChargerData[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
 
   useEffect(() => {
     fetchChargers()
@@ -79,7 +78,6 @@ export default function Home() {
 
       const results = await Promise.all(chargerPromises)
       setChargers(results)
-      setLastRefresh(new Date())
     } catch (error) {
       console.error("Error fetching chargers:", error)
     } finally {
@@ -140,7 +138,7 @@ export default function Home() {
         return "Invalid Date"
       }
       return date.toLocaleTimeString()
-    } catch (e) {
+    } catch (_) {
       return "Invalid Date"
     }
   }

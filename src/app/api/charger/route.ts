@@ -4,7 +4,7 @@ import puppeteer from "puppeteer"
 
 // Cache mechanism to prevent excessive requests
 interface CacheEntry {
-  data: any;
+  data: Record<string, unknown>;
   timestamp: number;
 }
 
@@ -52,22 +52,22 @@ const REAL_CHARGER_IDS = [
   "DE*MDS*E006198"
 ];
 
-// Replace 'any' types with proper interfaces or types
-interface ChargerResponse {
-  evseId: string;
-  status: string;
-  location: string;
-  operator: string;
-  address: string;
-  plugType?: string;
-  power?: string;
-  steckertyp?: string;
-  leistung?: string;
-  preis?: string;
-  lastUpdated: string;
-  isRealTime: boolean;
-  error?: string;
-}
+// Remove or comment out the unused ChargerResponse interface
+// interface ChargerResponse {
+//   evseId: string;
+//   status: string;
+//   location: string;
+//   operator: string;
+//   address: string;
+//   plugType?: string;
+//   power?: string;
+//   steckertyp?: string;
+//   leistung?: string;
+//   preis?: string;
+//   lastUpdated: string;
+//   isRealTime: boolean;
+//   error?: string;
+// }
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -124,7 +124,7 @@ export async function GET(request: Request) {
     // Wait for content to load
     try {
       await page.waitForSelector('.badge', { timeout: 5000 });
-    } catch (err) {
+    } catch (_) {
       console.log('Badge selector timeout, continuing anyway');
     }
     
