@@ -44,33 +44,31 @@ export default function StatusDialog({
     onOpenChange(open)
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
     setIsUpdating(true)
-    setError(null)
     
     try {
       const response = await fetch("/api/update-status", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           evseId: charger.evseId,
-          status,
+          status: status,
         }),
       })
-
-      if (response.ok) {
-        const data = await response.json()
-        onStatusUpdate(status)
-        onOpenChange(false)
-      } else {
-        const errorData = await response.json()
-        setError(errorData.message || "Failed to update status")
+      
+      if (!response.ok) {
+        throw new Error(`Failed to update status: ${response.statusText}`)
       }
-    } catch (error) {
-      console.error("Error updating status:", error)
-      setError("Network error. Please try again.")
+      
+      // Successfully updated
+      onStatusUpdate(status)
+      onOpenChange(false)
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      setError(errorMessage)
+      console.error("Error updating status:", errorMessage)
     } finally {
       setIsUpdating(false)
     }

@@ -10,10 +10,15 @@ interface CacheEntry {
 
 const cache: Record<string, CacheEntry> = {};
 
+interface UpdateStatusRequest {
+  evseId: string;
+  status: string;
+}
+
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
-    const { evseId, status } = body
+    const data: UpdateStatusRequest = await request.json()
+    const { evseId, status } = data
 
     if (!evseId || !status) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
@@ -57,15 +62,14 @@ export async function POST(request: Request) {
       message: "Status updated successfully",
       ...updatedData
     })
-  } catch (error) {
-    console.error("Error updating status:", error)
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`Error updating status: ${errorMessage}`);
+    
     return NextResponse.json(
-      {
-        error: "Failed to update status",
-        message: error instanceof Error ? error.message : String(error)
-      },
+      { success: false, message: `Failed to update status: ${errorMessage}` },
       { status: 500 }
-    )
+    );
   }
 }
 

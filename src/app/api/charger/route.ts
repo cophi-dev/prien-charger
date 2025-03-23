@@ -52,6 +52,23 @@ const REAL_CHARGER_IDS = [
   "DE*MDS*E006198"
 ];
 
+// Replace 'any' types with proper interfaces or types
+interface ChargerResponse {
+  evseId: string;
+  status: string;
+  location: string;
+  operator: string;
+  address: string;
+  plugType?: string;
+  power?: string;
+  steckertyp?: string;
+  leistung?: string;
+  preis?: string;
+  lastUpdated: string;
+  isRealTime: boolean;
+  error?: string;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const evseId = searchParams.get("evseId")
@@ -206,8 +223,10 @@ export async function GET(request: Request) {
     };
 
     return NextResponse.json(response);
-  } catch (error) {
-    console.error("Error fetching charger data:", error);
+  } catch (error: unknown) {
+    // Use error as unknown, then type check or cast as needed
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`Error fetching charger data: ${errorMessage}`);
     
     // Use the default data for the requested charger ID
     let chargerData;
@@ -238,7 +257,7 @@ export async function GET(request: Request) {
       price: chargerData.preis,
       lastUpdated: new Date().toISOString(),
       isRealTime: false,
-      error: error instanceof Error ? error.message : String(error)
+      error: errorMessage
     };
     
     return NextResponse.json(

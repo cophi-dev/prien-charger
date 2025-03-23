@@ -45,7 +45,7 @@ export default function Home() {
     }, 60 * 1000)
     
     return () => clearInterval(interval)
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchChargers = async () => {
     if (refreshing) return
