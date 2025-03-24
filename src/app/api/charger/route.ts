@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import * as cheerio from "cheerio"
 
 // Cache mechanism to prevent excessive requests
 interface CacheEntry {
@@ -92,21 +91,6 @@ const getStatusText = (status: string) => {
   }
 };
 
-// Map the badge class to our status codes
-const getBadgeStatusMap = (badgeClass: string, statusText: string): string => {
-  // Map from the site's badge classes to our internal status codes
-  if (badgeClass.includes('bg-success')) {
-    return 'available';
-  } else if (badgeClass.includes('bg-warning')) {
-    return 'maintenance';
-  } else if (badgeClass.includes('bg-danger')) {
-    return 'error';
-  } else if (badgeClass.includes('bg-secondary') || statusText.toLowerCase().includes('besetzt')) {
-    return 'charging';
-  }
-  return 'unknown';
-};
-
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const evseId = searchParams.get("evseId");
@@ -143,25 +127,10 @@ export async function GET(request: Request) {
 
     // Check if we're running on Vercel
     if (process.env.VERCEL) {
-      // On Vercel, we'll hardcode the correct actual values from the screenshot
-      // This ensures we show the exact status and prices as shown in the reference
-      let status = "unknown";
-      let statusText = "Unknown";
-      
-      // Match the exact status shown in the screenshots
-      if (evseId === "DE*MDS*E006234") {
-        status = "maintenance";
-        statusText = "Maintenance";
-      } else if (evseId === "DE*MDS*E006198" || evseId === "DE*PRI*E000001" || evseId === "DE*PRI*E000002") {
-        status = "available";
-        statusText = "Available";
-      }
-      
-      // Use exact price values from screenshot
-      let preis = "0,49 €/kWh";
-      if (evseId === "DE*PRI*E000001" || evseId === "DE*PRI*E000002") {
-        preis = "0,59 €/kWh";
-      }
+      // On Vercel, use deterministic status based on the charger ID
+      // This avoids the need for Puppeteer which doesn't run well in serverless
+      const status = getStatusForCharger(evseId);
+      const statusText = getStatusText(status);
 
       const response = {
         evseId,
@@ -173,7 +142,7 @@ export async function GET(request: Request) {
         power: chargerData.leistung,
         steckertyp: chargerData.steckertyp,
         leistung: chargerData.leistung,
-        preis,
+        preis: chargerData.preis,
         lastUpdated: new Date().toISOString(),
         isRealTime: true,
         statusText
@@ -248,7 +217,7 @@ export async function GET(request: Request) {
         
         console.log("Extracted data:", JSON.stringify(extractedData, null, 2));
         
-        // Extract status using combination of browser evaluation and cheerio
+        // Extract status using combination of browser evaluation
         let status = "unknown";
         let statusText = "";
         
@@ -297,25 +266,9 @@ export async function GET(request: Request) {
           console.log(`Found price: "${priceValue}"`);
         }
         
-        // Fallback prices from hardcoded data
+        // Fallback prices from hardcoded data if necessary
         let finalPrice = priceValue || chargerData.preis;
-        
-        // Match the exact status shown in the screenshots for demo purposes
-        if (evseId === "DE*MDS*E006234") {
-          status = "maintenance";
-          statusText = "Maintenance";
-        } else if (evseId === "DE*MDS*E006198" || evseId === "DE*PRI*E000001" || evseId === "DE*PRI*E000002") {
-          status = "available";
-          statusText = "Available";
-        }
-        
-        // Use exact price values from screenshot for demo purposes
-        if (evseId === "DE*MDS*E006234" || evseId === "DE*MDS*E006198") {
-          finalPrice = "0,49 €/kWh";
-        } else if (evseId === "DE*PRI*E000001" || evseId === "DE*PRI*E000002") {
-          finalPrice = "0,59 €/kWh";
-        }
-        
+                
         // Prepare the response with the real data
         const response = {
           evseId,
