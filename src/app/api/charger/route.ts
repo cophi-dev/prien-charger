@@ -61,12 +61,6 @@ const CHARGER_DATA: ChargerDataMap = {
   }
 };
 
-// More charger IDs from screenshot
-const REAL_CHARGER_IDS = [
-  "DE*MDS*E006234",
-  "DE*MDS*E006198"
-];
-
 // For simulating real-time status but making it deterministic based on charger ID
 const getStatusForCharger = (chargerId: string) => {
   // Use the full charger ID to deterministically assign a status
@@ -207,7 +201,8 @@ export async function GET(request: Request) {
         // Wait for content to load - target the exact selector from screenshot
         try {
           await page.waitForSelector('span.badge.rounded-pill', { timeout: 10000 });
-        } catch (err) {
+        } catch (_) {
+          // Use underscore as placeholder for unused variables
           console.log('Badge selector timeout, continuing anyway');
         }
 
