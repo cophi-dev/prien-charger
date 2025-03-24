@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import type { CheerioElement } from 'cheerio'
+import puppeteer from 'puppeteer';
 
 // Cache mechanism to prevent excessive requests
 interface CacheEntry {
@@ -61,36 +61,24 @@ const CHARGER_DATA: ChargerDataMap = {
   }
 };
 
-// For simulating real-time status but making it deterministic based on charger ID
-const getStatusForCharger = (chargerId: string) => {
-  // Use the full charger ID to deterministically assign a status
-  if (chargerId === "DE*MDS*E006234") {
-    return "maintenance"; // Ladestation 1 will always show maintenance
-  } else if (chargerId === "DE*MDS*E006198" || chargerId === "DE*PRI*E000001" || chargerId === "DE*PRI*E000002") {
-    return "available"; // Ladestations 2, 3, 4 will show available
-  } else {
-    // For any other chargers, use a hash of the ID for a stable but "random" status
-    const hash = chargerId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const statuses = ["available", "charging", "maintenance", "error"];
-    return statuses[hash % statuses.length];
-  }
-};
+let browser: any = null;
 
-// Convert status to German display text
-const getStatusText = (status: string) => {
-  switch (status) {
-    case "available":
-      return "Verfügbar";
-    case "charging":
-      return "Besetzt";
-    case "maintenance":
-      return "Wartung";
-    case "error":
-      return "Fehler";
-    default:
-      return "Unbekannt";
+// Initialize browser instance
+async function initBrowser() {
+  if (!browser) {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu'
+      ]
+    });
   }
-};
+  return browser;
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -120,98 +108,48 @@ export async function GET(request: Request) {
       address: "Prien am Chiemsee, 83209"
     };
 
-    // Fetch the page HTML directly
+    // Initialize browser if needed
+    const browser = await initBrowser();
+    const page = await browser.newPage();
+
+    // Set viewport and user agent
+    await page.setViewport({ width: 1280, height: 800 });
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+
+    // Navigate to the page and wait for content to load
     const url = `https://www.chrg.direct/?evseId=${encodeURIComponent(evseId)}`;
-    console.log(`Fetching data from: ${url}`);
+    await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
 
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    // Wait for status badge to appear
+    await page.waitForSelector('.badge.rounded-pill', { timeout: 10000 });
+
+    // Extract status information
+    const statusInfo = await page.evaluate(() => {
+      const badge = document.querySelector('.badge.rounded-pill');
+      if (!badge) return { status: 'unknown', statusText: 'Unbekannt' };
+
+      const text = badge.textContent?.trim().toLowerCase() || '';
+      const className = badge.className;
+
+      if (className.includes('bg-success') || text.includes('available') || text.includes('verfügbar')) {
+        return { status: 'available', statusText: 'Verfügbar' };
+      } else if (className.includes('bg-warning') || text.includes('maintenance') || text.includes('wartung')) {
+        return { status: 'maintenance', statusText: 'Wartung' };
+      } else if (className.includes('bg-danger') || text.includes('error') || text.includes('fehler')) {
+        return { status: 'error', statusText: 'Fehler' };
+      } else if (className.includes('bg-secondary') || text.includes('charging') || text.includes('besetzt')) {
+        return { status: 'charging', statusText: 'Besetzt' };
       }
+
+      return { status: 'unknown', statusText: 'Unbekannt' };
     });
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const html = await response.text();
-    
-    // Use dynamic import for cheerio to parse the HTML
-    // @ts-ignore
-    const cheerioModule = await import('cheerio');
-    // @ts-ignore
-    const $ = cheerioModule.default.load(html);
-
-    // Extract status using the exact selectors from the screenshot
-    let status = "unknown";
-    let statusText = "";
-
-    // Try multiple selector strategies
-    const statusBadge = $('.badge.rounded-pill.bg-success.text, .badge.rounded-pill.bg-warning.text, .badge.rounded-pill.bg-danger.text, .badge.rounded-pill.bg-secondary.text').first();
-    
-    if (statusBadge.length) {
-      const badgeText = statusBadge.text().trim();
-      const badgeClass = statusBadge.attr('class') || '';
-
-      console.log(`Found badge with text: "${badgeText}" and class: "${badgeClass}"`);
-
-      if (badgeClass.includes('bg-success')) {
-        status = 'available';
-        statusText = badgeText || "Available";
-      } else if (badgeClass.includes('bg-warning')) {
-        status = 'maintenance';
-        statusText = badgeText || "Maintenance";
-      } else if (badgeClass.includes('bg-danger')) {
-        status = 'error';
-        statusText = badgeText || "Error";
-      } else if (badgeClass.includes('bg-secondary')) {
-        status = 'charging';
-        statusText = badgeText || "Charging";
-      }
-    }
-
-    // If no status found, try text-based detection from all badges
-    if (status === "unknown") {
-      // @ts-ignore
-      $('.badge').each((_, elem) => {
-        const text = $(elem).text().trim().toLowerCase();
-        if (text.includes('available') || text.includes('verfügbar')) {
-          status = 'available';
-          statusText = $(elem).text().trim();
-        } else if (text.includes('maintenance') || text.includes('wartung')) {
-          status = 'maintenance';
-          statusText = $(elem).text().trim();
-        } else if (text.includes('error') || text.includes('fehler')) {
-          status = 'error';
-          statusText = $(elem).text().trim();
-        } else if (text.includes('charging') || text.includes('besetzt') || text.includes('occupied')) {
-          status = 'charging';
-          statusText = $(elem).text().trim();
-        }
-      });
-    }
-
-    // Extract price information
-    let priceValue = chargerData.preis;
-    // @ts-ignore
-    $('div.col-7, div[class*="tariff-info"] div').each((_, elem) => {
-      const text = $(elem).text().trim();
-      if (text.includes('€')) {
-        priceValue = text;
-        return false; // break the loop
-      }
-    });
-
-    // If still unknown, use deterministic fallback
-    if (status === "unknown") {
-      console.log("Could not determine status, using fallback");
-      status = getStatusForCharger(evseId);
-      statusText = getStatusText(status);
-    }
+    // Close the page to free up resources
+    await page.close();
 
     const response_data = {
       evseId,
-      status,
+      status: statusInfo.status,
       location: chargerData.location,
       operator: "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
       address: chargerData.address,
@@ -219,10 +157,10 @@ export async function GET(request: Request) {
       power: chargerData.leistung,
       steckertyp: chargerData.steckertyp,
       leistung: chargerData.leistung,
-      preis: priceValue,
+      preis: chargerData.preis,
       lastUpdated: new Date().toISOString(),
       isRealTime: true,
-      statusText
+      statusText: statusInfo.statusText
     };
 
     // Cache the response
@@ -237,12 +175,9 @@ export async function GET(request: Request) {
     console.error('Error fetching charger data:', error);
     
     // Use the full evseId for status
-    const status = getStatusForCharger(evseId);
-    const statusText = getStatusText(status);
-    
     const defaultResponse = {
       evseId,
-      status,
+      status: 'unknown',
       location: CHARGER_DATA[evseId]?.location || `Charger ${evseId}`,
       operator: "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
       address: CHARGER_DATA[evseId]?.address || "Prien am Chiemsee, 83209",
@@ -253,7 +188,7 @@ export async function GET(request: Request) {
       preis: CHARGER_DATA[evseId]?.preis || "0,49 €/kWh",
       lastUpdated: new Date().toISOString(),
       isRealTime: false,
-      statusText,
+      statusText: 'Unbekannt',
       error: error instanceof Error ? error.message : String(error)
     };
     
