@@ -201,8 +201,8 @@ export async function GET(request: Request) {
         // Wait for content to load - target the exact selector from screenshot
         try {
           await page.waitForSelector('span.badge.rounded-pill', { timeout: 10000 });
-        } catch (_) {
-          // Use underscore as placeholder for unused variables
+        } catch {
+          // No need to declare the error variable if we're not using it
           console.log('Badge selector timeout, continuing anyway');
         }
 
