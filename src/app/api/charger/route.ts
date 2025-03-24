@@ -193,31 +193,55 @@ export async function GET(request: Request) {
         
         // Extract all key information directly from the page
         const extractedData = await page.evaluate(() => {
-          const statusBadge = document.querySelector('span.badge.rounded-pill');
+          // Use the exact selector from the screenshot
+          const statusBadge = document.querySelector('span.badge.rounded-pill.bg-success.text') || 
+                              document.querySelector('span.badge.rounded-pill');
           const statusText = statusBadge ? statusBadge.textContent?.trim() : null;
           const statusClass = statusBadge ? statusBadge.className : null;
           
+          // Capture the full HTML of relevant sections for debugging
+          const statusSection = document.querySelector('div[data-v-bab129be]');
+          const statusHtml = statusSection ? statusSection.innerHTML : '';
+          
           // Try to get prices from various places
           const priceElements = [
-            ...Array.from(document.querySelectorAll('div.tariff-info_details div.col-7')),
+            ...Array.from(document.querySelectorAll('div[class*="col-7"]')),
             ...Array.from(document.querySelectorAll('div.row div.col-7')),
-            ...Array.from(document.querySelectorAll('div[class*="tariff"] div')),
+            ...Array.from(document.querySelectorAll('div[class*="tariff-info"] div')),
           ];
           
+          // Filter price elements to find ones containing the € symbol
           const prices = priceElements
             .map(el => el.textContent?.trim())
             .filter(text => text && text.includes('€'));
           
+          // Additional debug information for status
+          const allBadges = Array.from(document.querySelectorAll('span.badge'))
+            .map(badge => ({
+              text: badge.textContent?.trim() || '',
+              class: badge.className
+            }));
+          
+          // Capture all possible elements that might contain price information
+          const allPriceContainers = Array.from(document.querySelectorAll('div[class*="tariff"], div[class*="price"], div.col-7'))
+            .map(el => ({
+              text: el.textContent?.trim() || '',
+              class: el.className
+            }));
+          
           return {
             statusText,
             statusClass,
-            prices
+            statusHtml,
+            prices,
+            allBadges,
+            allPriceContainers
           };
         });
         
         console.log("Extracted data:", JSON.stringify(extractedData, null, 2));
         
-        // Extract status using combination of browser evaluation
+        // Parse the status HTML directly to find the badge if needed
         let status = "unknown";
         let statusText = "";
         
@@ -228,24 +252,32 @@ export async function GET(request: Request) {
           if (extractedData.statusClass) {
             console.log(`Found status badge class: "${extractedData.statusClass}"`);
             
-            // Determine status based on class and text
+            // More precise class matching based on screenshot
             if (extractedData.statusClass.includes('bg-success')) {
               status = 'available';
+              statusText = "Available";
             } else if (extractedData.statusClass.includes('bg-warning')) {
               status = 'maintenance';
+              statusText = "Maintenance";
             } else if (extractedData.statusClass.includes('bg-danger')) {
               status = 'error';
-            } else if (extractedData.statusClass.includes('bg-secondary') || statusText.toLowerCase().includes('besetzt')) {
+              statusText = "Error";
+            } else if (extractedData.statusClass.includes('bg-secondary')) {
+              status = 'charging';
+              statusText = "Charging";
+            }
+          } else {
+            // Fallback text-based detection
+            const lowerText = statusText.toLowerCase();
+            if (lowerText.includes('available') || lowerText.includes('verfügbar')) {
+              status = 'available';
+            } else if (lowerText.includes('maintenance') || lowerText.includes('wartung')) {
+              status = 'maintenance';
+            } else if (lowerText.includes('error') || lowerText.includes('fehler')) {
+              status = 'error';
+            } else if (lowerText.includes('charging') || lowerText.includes('besetzt') || lowerText.includes('occupied')) {
               status = 'charging';
             }
-          } else if (statusText.toLowerCase().includes('available') || statusText.toLowerCase().includes('verfügbar')) {
-            status = 'available';
-          } else if (statusText.toLowerCase().includes('maintenance') || statusText.toLowerCase().includes('wartung')) {
-            status = 'maintenance';
-          } else if (statusText.toLowerCase().includes('error') || statusText.toLowerCase().includes('fehler')) {
-            status = 'error';
-          } else if (statusText.toLowerCase().includes('charging') || statusText.toLowerCase().includes('besetzt')) {
-            status = 'charging';
           }
         }
         
@@ -264,6 +296,60 @@ export async function GET(request: Request) {
           const priceText = extractedData.prices[0] ?? "";
           priceValue = priceText;
           console.log(`Found price: "${priceValue}"`);
+        }
+        
+        // Check all badges from debug data if we didn't find a status directly
+        if (status === "unknown" && extractedData.allBadges && extractedData.allBadges.length > 0) {
+          console.log("Checking all badges:", extractedData.allBadges);
+          
+          // Find any badge with the success class
+          const availableBadge = extractedData.allBadges.find(badge => 
+            badge.class && badge.class.includes('bg-success')
+          );
+          
+          if (availableBadge) {
+            status = 'available';
+            statusText = availableBadge.text || "Available";
+            console.log(`Found available badge with text: "${statusText}"`);
+          }
+          
+          // Or any badge with maintenance/warning class
+          const maintenanceBadge = extractedData.allBadges.find(badge => 
+            badge.class && badge.class.includes('bg-warning')
+          );
+          
+          if (maintenanceBadge) {
+            status = 'maintenance';
+            statusText = maintenanceBadge.text || "Maintenance";
+            console.log(`Found maintenance badge with text: "${statusText}"`);
+          }
+          
+          // Or any badge mentioning "Available" text
+          const textAvailableBadge = extractedData.allBadges.find(badge => 
+            badge.text && (badge.text.toLowerCase().includes('available') || 
+                          badge.text.toLowerCase().includes('verfügbar'))
+          );
+          
+          if (textAvailableBadge) {
+            status = 'available';
+            statusText = textAvailableBadge.text;
+            console.log(`Found available badge by text: "${statusText}"`);
+          }
+        }
+        
+        // Process all price containers if we didn't find a price
+        if ((!priceValue || priceValue === "") && extractedData.allPriceContainers && extractedData.allPriceContainers.length > 0) {
+          console.log("Checking all price containers:", extractedData.allPriceContainers);
+          
+          // Find any container with € symbol
+          const priceContainer = extractedData.allPriceContainers.find(container => 
+            container.text && container.text.includes('€')
+          );
+          
+          if (priceContainer) {
+            priceValue = priceContainer.text;
+            console.log(`Found price in container: "${priceValue}"`);
+          }
         }
         
         // Fallback prices from hardcoded data if necessary
