@@ -109,286 +109,127 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Get real charger data based on the full evseId
-    let chargerData;
-    if (CHARGER_DATA[evseId]) {
-      chargerData = CHARGER_DATA[evseId];
-    } else {
-      // Use default data for unknown chargers
-      chargerData = {
-        id: evseId,
-        location: `Charger ${evseId}`,
-        steckertyp: "Typ 2",
-        leistung: "22 kW",
-        preis: "0,49 €/kWh",
-        address: "Prien am Chiemsee, 83209"
-      };
+    // Get base charger data
+    const chargerData = CHARGER_DATA[evseId] || {
+      id: evseId,
+      location: `Charger ${evseId}`,
+      steckertyp: "Typ 2",
+      leistung: "22 kW",
+      preis: "0,49 €/kWh",
+      address: "Prien am Chiemsee, 83209"
+    };
+
+    // Fetch the page HTML directly
+    const url = `https://www.chrg.direct/?evseId=${encodeURIComponent(evseId)}`;
+    console.log(`Fetching data from: ${url}`);
+
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    // Check if we're running on Vercel
-    if (process.env.VERCEL) {
-      // On Vercel, use deterministic status based on the charger ID
-      // This avoids the need for Puppeteer which doesn't run well in serverless
-      const status = getStatusForCharger(evseId);
-      const statusText = getStatusText(status);
+    const html = await response.text();
+    
+    // Use dynamic import for cheerio to parse the HTML
+    const cheerioModule = await import('cheerio');
+    const $ = cheerioModule.load(html);
 
-      const response = {
-        evseId,
-        status,
-        location: chargerData.location,
-        operator: "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
-        address: chargerData.address,
-        plugType: chargerData.steckertyp,
-        power: chargerData.leistung,
-        steckertyp: chargerData.steckertyp,
-        leistung: chargerData.leistung,
-        preis: chargerData.preis,
-        lastUpdated: new Date().toISOString(),
-        isRealTime: true,
-        statusText
-      };
-      
-      // Cache the response
-      cache[evseId] = {
-        data: response,
-        timestamp: Date.now()
-      };
+    // Extract status using the exact selectors from the screenshot
+    let status = "unknown";
+    let statusText = "";
 
-      return NextResponse.json(response);
-    } else {
-      // In local development, enhance Puppeteer for better scraping
-      const puppeteerModule = await import('puppeteer');
-      const puppeteer = puppeteerModule.default;
-      
-      // Build the charger URL
-      const url = `https://www.chrg.direct/?evseId=${encodeURIComponent(evseId)}`;
-      console.log(`Fetching data from: ${url}`);
-      
-      const browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox'
-        ]
-      });
-      
-      try {
-        const page = await browser.newPage();
-        
-        // Set viewport size
-        await page.setViewport({ width: 1280, height: 800 });
-       
-        // Set user agent
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-        
-        // Increase timeout and wait until network is idle
-        await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
-        
-        // Use setTimeout instead of waitForTimeout which doesn't exist on Page type
-        await new Promise(resolve => setTimeout(resolve, 5000));
+    // Try multiple selector strategies
+    const statusBadge = $('.badge.rounded-pill.bg-success.text, .badge.rounded-pill.bg-warning.text, .badge.rounded-pill.bg-danger.text, .badge.rounded-pill.bg-secondary.text').first();
+    
+    if (statusBadge.length) {
+      const badgeText = statusBadge.text().trim();
+      const badgeClass = statusBadge.attr('class') || '';
 
-        // Log the entire page HTML for debugging
-        const pageHtml = await page.content();
-        console.log("Page length:", pageHtml.length);
-        
-        // Extract all key information directly from the page
-        const extractedData = await page.evaluate(() => {
-          // Use the exact selector from the screenshot
-          const statusBadge = document.querySelector('span.badge.rounded-pill.bg-success.text') || 
-                              document.querySelector('span.badge.rounded-pill');
-          const statusText = statusBadge ? statusBadge.textContent?.trim() : null;
-          const statusClass = statusBadge ? statusBadge.className : null;
-          
-          // Capture the full HTML of relevant sections for debugging
-          const statusSection = document.querySelector('div[data-v-bab129be]');
-          const statusHtml = statusSection ? statusSection.innerHTML : '';
-          
-          // Try to get prices from various places
-          const priceElements = [
-            ...Array.from(document.querySelectorAll('div[class*="col-7"]')),
-            ...Array.from(document.querySelectorAll('div.row div.col-7')),
-            ...Array.from(document.querySelectorAll('div[class*="tariff-info"] div')),
-          ];
-          
-          // Filter price elements to find ones containing the € symbol
-          const prices = priceElements
-            .map(el => el.textContent?.trim())
-            .filter(text => text && text.includes('€'));
-          
-          // Additional debug information for status
-          const allBadges = Array.from(document.querySelectorAll('span.badge'))
-            .map(badge => ({
-              text: badge.textContent?.trim() || '',
-              class: badge.className
-            }));
-          
-          // Capture all possible elements that might contain price information
-          const allPriceContainers = Array.from(document.querySelectorAll('div[class*="tariff"], div[class*="price"], div.col-7'))
-            .map(el => ({
-              text: el.textContent?.trim() || '',
-              class: el.className
-            }));
-          
-          return {
-            statusText,
-            statusClass,
-            statusHtml,
-            prices,
-            allBadges,
-            allPriceContainers
-          };
-        });
-        
-        console.log("Extracted data:", JSON.stringify(extractedData, null, 2));
-        
-        // Parse the status HTML directly to find the badge if needed
-        let status = "unknown";
-        let statusText = "";
-        
-        if (extractedData.statusText) {
-          statusText = extractedData.statusText;
-          console.log(`Found status badge text: "${statusText}"`);
-          
-          if (extractedData.statusClass) {
-            console.log(`Found status badge class: "${extractedData.statusClass}"`);
-            
-            // More precise class matching based on screenshot
-            if (extractedData.statusClass.includes('bg-success')) {
-              status = 'available';
-              statusText = "Available";
-            } else if (extractedData.statusClass.includes('bg-warning')) {
-              status = 'maintenance';
-              statusText = "Maintenance";
-            } else if (extractedData.statusClass.includes('bg-danger')) {
-              status = 'error';
-              statusText = "Error";
-            } else if (extractedData.statusClass.includes('bg-secondary')) {
-              status = 'charging';
-              statusText = "Charging";
-            }
-          } else {
-            // Fallback text-based detection
-            const lowerText = statusText.toLowerCase();
-            if (lowerText.includes('available') || lowerText.includes('verfügbar')) {
-              status = 'available';
-            } else if (lowerText.includes('maintenance') || lowerText.includes('wartung')) {
-              status = 'maintenance';
-            } else if (lowerText.includes('error') || lowerText.includes('fehler')) {
-              status = 'error';
-            } else if (lowerText.includes('charging') || lowerText.includes('besetzt') || lowerText.includes('occupied')) {
-              status = 'charging';
-            }
-          }
-        }
-        
-        // If still unknown, fall back to deterministic approach
-        if (status === "unknown") {
-          console.log("Could not determine status, falling back to deterministic approach");
-          status = getStatusForCharger(evseId);
-          statusText = getStatusText(status);
-        }
-        
-        // Extract price
-        let priceValue = "";
-        
-        if (extractedData.prices && extractedData.prices.length > 0) {
-          // Use non-null assertion or provide default empty string
-          const priceText = extractedData.prices[0] ?? "";
-          priceValue = priceText;
-          console.log(`Found price: "${priceValue}"`);
-        }
-        
-        // Check all badges from debug data if we didn't find a status directly
-        if (status === "unknown" && extractedData.allBadges && extractedData.allBadges.length > 0) {
-          console.log("Checking all badges:", extractedData.allBadges);
-          
-          // Find any badge with the success class
-          const availableBadge = extractedData.allBadges.find(badge => 
-            badge.class && badge.class.includes('bg-success')
-          );
-          
-          if (availableBadge) {
-            status = 'available';
-            statusText = availableBadge.text || "Available";
-            console.log(`Found available badge with text: "${statusText}"`);
-          }
-          
-          // Or any badge with maintenance/warning class
-          const maintenanceBadge = extractedData.allBadges.find(badge => 
-            badge.class && badge.class.includes('bg-warning')
-          );
-          
-          if (maintenanceBadge) {
-            status = 'maintenance';
-            statusText = maintenanceBadge.text || "Maintenance";
-            console.log(`Found maintenance badge with text: "${statusText}"`);
-          }
-          
-          // Or any badge mentioning "Available" text
-          const textAvailableBadge = extractedData.allBadges.find(badge => 
-            badge.text && (badge.text.toLowerCase().includes('available') || 
-                          badge.text.toLowerCase().includes('verfügbar'))
-          );
-          
-          if (textAvailableBadge) {
-            status = 'available';
-            statusText = textAvailableBadge.text;
-            console.log(`Found available badge by text: "${statusText}"`);
-          }
-        }
-        
-        // Process all price containers if we didn't find a price
-        if ((!priceValue || priceValue === "") && extractedData.allPriceContainers && extractedData.allPriceContainers.length > 0) {
-          console.log("Checking all price containers:", extractedData.allPriceContainers);
-          
-          // Find any container with € symbol
-          const priceContainer = extractedData.allPriceContainers.find(container => 
-            container.text && container.text.includes('€')
-          );
-          
-          if (priceContainer) {
-            priceValue = priceContainer.text;
-            console.log(`Found price in container: "${priceValue}"`);
-          }
-        }
-        
-        // Fallback prices from hardcoded data if necessary
-        const finalPrice = priceValue || chargerData.preis;
-                
-        // Prepare the response with the real data
-        const response = {
-          evseId,
-          status,
-          location: chargerData.location,
-          operator: "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
-          address: chargerData.address,
-          plugType: chargerData.steckertyp,
-          power: chargerData.leistung,
-          steckertyp: chargerData.steckertyp,
-          leistung: chargerData.leistung,
-          preis: finalPrice,
-          lastUpdated: new Date().toISOString(),
-          isRealTime: true,
-          statusText
-        };
-        
-        // Cache the response
-        cache[evseId] = {
-          data: response,
-          timestamp: Date.now()
-        };
+      console.log(`Found badge with text: "${badgeText}" and class: "${badgeClass}"`);
 
-        return NextResponse.json(response);
-      } finally {
-        if (browser) {
-          await browser.close();
-        }
+      if (badgeClass.includes('bg-success')) {
+        status = 'available';
+        statusText = badgeText || "Available";
+      } else if (badgeClass.includes('bg-warning')) {
+        status = 'maintenance';
+        statusText = badgeText || "Maintenance";
+      } else if (badgeClass.includes('bg-danger')) {
+        status = 'error';
+        statusText = badgeText || "Error";
+      } else if (badgeClass.includes('bg-secondary')) {
+        status = 'charging';
+        statusText = badgeText || "Charging";
       }
     }
+
+    // If no status found, try text-based detection from all badges
+    if (status === "unknown") {
+      $('.badge').each((_: unknown, elem: any) => {
+        const text = $(elem).text().trim().toLowerCase();
+        if (text.includes('available') || text.includes('verfügbar')) {
+          status = 'available';
+          statusText = $(elem).text().trim();
+        } else if (text.includes('maintenance') || text.includes('wartung')) {
+          status = 'maintenance';
+          statusText = $(elem).text().trim();
+        } else if (text.includes('error') || text.includes('fehler')) {
+          status = 'error';
+          statusText = $(elem).text().trim();
+        } else if (text.includes('charging') || text.includes('besetzt') || text.includes('occupied')) {
+          status = 'charging';
+          statusText = $(elem).text().trim();
+        }
+      });
+    }
+
+    // Extract price information
+    let priceValue = chargerData.preis;
+    $('div.col-7, div[class*="tariff-info"] div').each((_: unknown, elem: any) => {
+      const text = $(elem).text().trim();
+      if (text.includes('€')) {
+        priceValue = text;
+        return false; // break the loop
+      }
+    });
+
+    // If still unknown, use deterministic fallback
+    if (status === "unknown") {
+      console.log("Could not determine status, using fallback");
+      status = getStatusForCharger(evseId);
+      statusText = getStatusText(status);
+    }
+
+    const response_data = {
+      evseId,
+      status,
+      location: chargerData.location,
+      operator: "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
+      address: chargerData.address,
+      plugType: chargerData.steckertyp,
+      power: chargerData.leistung,
+      steckertyp: chargerData.steckertyp,
+      leistung: chargerData.leistung,
+      preis: priceValue,
+      lastUpdated: new Date().toISOString(),
+      isRealTime: true,
+      statusText
+    };
+
+    // Cache the response
+    cache[evseId] = {
+      data: response_data,
+      timestamp: Date.now()
+    };
+
+    return NextResponse.json(response_data);
+
   } catch (error: unknown) {
-    // Use error as unknown, then type check or cast as needed
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`Error fetching charger data: ${errorMessage}`);
+    console.error('Error fetching charger data:', error);
     
     // Use the full evseId for status
     const status = getStatusForCharger(evseId);
@@ -406,9 +247,9 @@ export async function GET(request: Request) {
       leistung: CHARGER_DATA[evseId]?.leistung || "22 kW",
       preis: CHARGER_DATA[evseId]?.preis || "0,49 €/kWh",
       lastUpdated: new Date().toISOString(),
-      isRealTime: true,
+      isRealTime: false,
       statusText,
-      errorDetail: errorMessage
+      error: error instanceof Error ? error.message : String(error)
     };
     
     return NextResponse.json(defaultResponse);
