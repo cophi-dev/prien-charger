@@ -267,7 +267,7 @@ export async function GET(request: Request) {
         }
         
         // Fallback prices from hardcoded data if necessary
-        let finalPrice = priceValue || chargerData.preis;
+        const finalPrice = priceValue || chargerData.preis;
                 
         // Prepare the response with the real data
         const response = {
