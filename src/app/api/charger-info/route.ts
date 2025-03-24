@@ -1,5 +1,40 @@
 import { NextResponse } from "next/server"
 
+// Define the charger data interface
+interface ChargerInfo {
+  id: string;
+  location: string;
+  steckertyp: string;
+  leistung: string;
+  preis: string;
+  address: string;
+}
+
+// Define the type for CHARGER_DATA with an index signature
+type ChargerDataMap = {
+  [key: string]: ChargerInfo;
+};
+
+// Data from the screenshot for the actual chargers
+const CHARGER_DATA: ChargerDataMap = {
+  "DE*MDS*E006234": {
+    id: "DE*MDS*E006234",
+    location: "Ladestation 1",
+    steckertyp: "Typ 2",
+    leistung: "22 kW",
+    preis: "0,49 €/kWh",
+    address: "Prien am Chiemsee, 83209"
+  },
+  "DE*MDS*E006198": {
+    id: "DE*MDS*E006198",
+    location: "Ladestation 2",
+    steckertyp: "Typ 2",
+    leistung: "22 kW",
+    preis: "0,49 €/kWh",
+    address: "Prien am Chiemsee, 83209"
+  }
+};
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const evseId = searchParams.get("evseId")
@@ -9,6 +44,12 @@ export async function GET(request: Request) {
   }
 
   try {
+    // Get base charger data
+    const chargerData = CHARGER_DATA[evseId];
+    if (!chargerData) {
+      throw new Error(`No data found for charger ${evseId}`);
+    }
+
     // Instead of fetching the page directly, let's use a two-step approach
     // First, get the page to establish any necessary cookies
     const initialResponse = await fetch(`https://www.chrg.direct/?evseId=${encodeURIComponent(evseId)}`, {
@@ -76,21 +117,21 @@ export async function GET(request: Request) {
     if (html.includes("Adhoc Payment") && !html.includes("AUG. PRIEN")) {
       console.log("Still receiving initial page without charger data")
 
-      // Since we can't get the real-time data, let's simulate a real API response
+      // Since we can't get the real-time data, let's use our local data
       // but be honest about it being simulated
       return NextResponse.json({
         evseId,
-        location: "AUG. PRIEN Bauleiterparklatz Zitadellenstraße",
+        location: chargerData.location,
         operator: "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
-        address: "Dampfschiffsweg 2, 21079 Hamburg",
-        plugType: "Type 2 (Mennekes) (max. 22 kW)",
-        power: "22 kW",
-        price: "0.625",
-        status: "available", // Based on your screenshot
-        statusText: "Available",
+        address: chargerData.address,
+        plugType: chargerData.steckertyp,
+        power: chargerData.leistung,
+        price: chargerData.preis,
+        status: "unknown", // We can't get real-time status
+        statusText: "Unbekannt",
         lastUpdated: new Date().toISOString(),
         isSimulated: true,
-        message: "Using simulated data because the website requires JavaScript rendering",
+        message: "Using local data because the website requires JavaScript rendering",
       })
     }
 
@@ -102,62 +143,41 @@ export async function GET(request: Request) {
 
     // Extract data from the HTML
     let status = "unknown"
-    let statusText = ""
+    let statusText = "Unbekannt"
 
-    // Look for the status badge
-    const specificBadge = $("span[data-v-bab129be].badge.rounded-pill")
+    // Look for the status badge with multiple selectors
+    const statusBadges = $('.badge.rounded-pill');
+    
+    // @ts-ignore
+    statusBadges.each((_, elem) => {
+      const badge = $(elem);
+      const text = badge.text().trim().toLowerCase();
+      const className = badge.attr('class') || '';
 
-    if (specificBadge.length) {
-      statusText = specificBadge.text().trim()
-      const badgeClass = specificBadge.attr("class") || ""
-
-      if (badgeClass.includes("bg-success") || statusText.toLowerCase() === "available") {
-        status = "available"
-      } else if (badgeClass.includes("bg-danger") || badgeClass.includes("bg-warning")) {
-        status = "error"
-      } else if (
-        badgeClass.includes("bg-primary") ||
-        badgeClass.includes("bg-info") ||
-        statusText.toLowerCase() === "occupied"
-      ) {
-        status = "charging"
+      if (className.includes('bg-success') || text.includes('available') || text.includes('verfügbar')) {
+        status = 'available';
+        statusText = 'Verfügbar';
+      } else if (className.includes('bg-warning') || text.includes('maintenance') || text.includes('wartung')) {
+        status = 'maintenance';
+        statusText = 'Wartung';
+      } else if (className.includes('bg-danger') || text.includes('error') || text.includes('fehler')) {
+        status = 'error';
+        statusText = 'Fehler';
+      } else if (className.includes('bg-secondary') || text.includes('charging') || text.includes('besetzt')) {
+        status = 'charging';
+        statusText = 'Besetzt';
       }
-    } else if (html.includes('class="badge rounded-pill bg-success text">Available')) {
-      status = "available"
-      statusText = "Available"
-    } else if (html.includes('class="badge rounded-pill bg-primary text">Occupied')) {
-      status = "charging"
-      statusText = "Occupied"
-    }
+    });
 
-    // Extract other data
-    const location =
-      $(".accordion-button").text().trim() ||
-      $("h1, .header-title").first().text().trim() ||
-      $(".card-header h5").text().trim()
-
-    const operator = $('div:contains("Operator:")').next().text().trim()
-    const address = $('div:contains("Address:")').next().text().trim()
-    const plugType = $('div:contains("Plug:")').next().text().trim()
-
-    // Extract power from plug type
-    let power = "22 kW" // Default
-    if (plugType) {
-      const powerMatch = plugType.match(/$$max\.\s*(\d+)\s*kW$$/)
-      if (powerMatch && powerMatch[1]) {
-        power = `${powerMatch[1]} kW`
-      }
-    }
-
-    // Return the data
+    // Return the data combining our local data with any real-time status we found
     return NextResponse.json({
       evseId,
-      location: location || "AUG. PRIEN Bauleiterparklatz Zitadellenstraße",
-      operator: operator || "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
-      address: address || "Dampfschiffsweg 2, 21079 Hamburg",
-      plugType: plugType || "Type 2 (Mennekes) (max. 22 kW)",
-      power,
-      price: "0.625", // Default price
+      location: chargerData.location,
+      operator: "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
+      address: chargerData.address,
+      plugType: chargerData.steckertyp,
+      power: chargerData.leistung,
+      price: chargerData.preis,
       status,
       statusText,
       lastUpdated: new Date().toISOString(),
@@ -165,6 +185,26 @@ export async function GET(request: Request) {
     })
   } catch (error) {
     console.error("Error fetching charger info:", error)
+    
+    // If we have local data, return it with unknown status
+    const chargerData = CHARGER_DATA[evseId];
+    if (chargerData) {
+      return NextResponse.json({
+        evseId,
+        location: chargerData.location,
+        operator: "AUG. PRIEN Bauunternehmung (GmbH & Co. KG)",
+        address: chargerData.address,
+        plugType: chargerData.steckertyp,
+        power: chargerData.leistung,
+        price: chargerData.preis,
+        status: "unknown",
+        statusText: "Unbekannt",
+        lastUpdated: new Date().toISOString(),
+        isSimulated: true,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+    
     return NextResponse.json(
       {
         error: "Failed to fetch charger info",
