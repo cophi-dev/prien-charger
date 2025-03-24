@@ -137,8 +137,10 @@ export async function GET(request: Request) {
     const html = await response.text();
     
     // Use dynamic import for cheerio to parse the HTML
+    // @ts-ignore
     const cheerioModule = await import('cheerio');
-    const $ = cheerioModule.load(html);
+    // @ts-ignore
+    const $ = cheerioModule.default.load(html);
 
     // Extract status using the exact selectors from the screenshot
     let status = "unknown";
@@ -170,7 +172,8 @@ export async function GET(request: Request) {
 
     // If no status found, try text-based detection from all badges
     if (status === "unknown") {
-      $('.badge').each((_: number, elem: CheerioElement) => {
+      // @ts-ignore
+      $('.badge').each((_, elem) => {
         const text = $(elem).text().trim().toLowerCase();
         if (text.includes('available') || text.includes('verfügbar')) {
           status = 'available';
@@ -190,7 +193,8 @@ export async function GET(request: Request) {
 
     // Extract price information
     let priceValue = chargerData.preis;
-    $('div.col-7, div[class*="tariff-info"] div').each((_: number, elem: CheerioElement) => {
+    // @ts-ignore
+    $('div.col-7, div[class*="tariff-info"] div').each((_, elem) => {
       const text = $(elem).text().trim();
       if (text.includes('€')) {
         priceValue = text;
