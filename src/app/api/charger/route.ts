@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import type { CheerioElement } from 'cheerio'
 
 // Cache mechanism to prevent excessive requests
 interface CacheEntry {
@@ -169,7 +170,7 @@ export async function GET(request: Request) {
 
     // If no status found, try text-based detection from all badges
     if (status === "unknown") {
-      $('.badge').each((_: unknown, elem: any) => {
+      $('.badge').each((_: number, elem: CheerioElement) => {
         const text = $(elem).text().trim().toLowerCase();
         if (text.includes('available') || text.includes('verfügbar')) {
           status = 'available';
@@ -189,7 +190,7 @@ export async function GET(request: Request) {
 
     // Extract price information
     let priceValue = chargerData.preis;
-    $('div.col-7, div[class*="tariff-info"] div').each((_: unknown, elem: any) => {
+    $('div.col-7, div[class*="tariff-info"] div').each((_: number, elem: CheerioElement) => {
       const text = $(elem).text().trim();
       if (text.includes('€')) {
         priceValue = text;
