@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import * as cheerio from "cheerio"
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -95,7 +94,11 @@ export async function GET(request: Request) {
       })
     }
 
-    const $ = cheerio.load(html)
+    // Use dynamic import for cheerio to parse the HTML
+    // @ts-ignore
+    const cheerioModule = await import('cheerio');
+    // @ts-ignore
+    const $ = cheerioModule.default.load(html);
 
     // Extract data from the HTML
     let status = "unknown"
